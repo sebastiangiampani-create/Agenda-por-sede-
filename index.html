@@ -22,6 +22,13 @@
     .chip{border:1px solid #ddd;border-radius:999px;padding:6px 10px}
     .meta{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
     .counter{font-weight:600;border:1px solid #ddd;border-radius:8px;padding:6px 10px}
+
+    /* Tarjetas de comisión con tabla de detalles */
+    .comision-card{border:1px solid #e9e9e9;border-radius:10px;padding:12px;margin-top:12px}
+    .comision-title{font-weight:600;margin:0 0 8px 0}
+    .mini-table{width:100%;border-collapse:collapse}
+    .mini-table th,.mini-table td{border:1px solid #eee;padding:8px;text-align:left;font-size:14px}
+    .mini-table th{background:#f7f7f7}
   </style>
 </head>
 <body>
@@ -33,7 +40,7 @@
     </div>
 
     <div class="card">
-      <p class="muted">Elegí primero la <b>Escuela</b>, después el <b>Día</b>, luego el <b>Horario</b>. Te mostramos las <b>Comisiones</b> disponibles.</p>
+      <p class="muted">Elegí primero la <b>Escuela</b>, después el <b>Día</b>, luego el <b>Horario</b>. Te mostramos las <b>Comisiones</b> disponibles con sus datos.</p>
 
       <div class="row">
         <div>
@@ -61,21 +68,20 @@
 
       <div class="meta">
         <div id="status" class="muted">Cargando datos…</div>
-        <!-- Contador de comisiones/aulas -->
         <div id="contador" class="counter" aria-live="polite">Comisiones: 0</div>
       </div>
 
       <div class="hr"></div>
 
       <div>
-        <div class="muted">Comisiones coincidentes:</div>
-        <div id="comisiones" class="chips" aria-live="polite"></div>
+        <div class="muted">Resultados:</div>
+        <div id="resultados"></div>
       </div>
     </div>
   </div>
 
   <script>
-    // === CSV público publicado por vos ===
+    // === CSV público ===
     const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQgHmSCDyof2tEKeRp77d9vnBhpQvAbVfy1NDqDE_Q9CvvGVaObzWLEjnjRYlJCJhVPTDR8fwckvu4D/pub?output=csv";
 
     // Helpers
@@ -108,15 +114,16 @@
     // Estado
     let HEADERS=[], ROWS=[];
     let H_ESC=null, H_DIA=null, H_HOR=null, H_COM=null;
+    let EXTRA_HEADERS=[];
 
     // UI refs
     const $escuela = document.getElementById('escuela');
     const $dia     = document.getElementById('dia');
     const $horario = document.getElementById('horario');
     const $status  = document.getElementById('status');
-    const $comis   = document.getElementById('comisiones');
     const $limpiar = document.getElementById('limpiar');
     const $contador = document.getElementById('contador');
+    const $resultados = document.getElementById('resultados');
 
     // Carga inicial
     (async function init(){
@@ -139,6 +146,10 @@
           throw new Error("Encabezados requeridos no encontrados. Se esperan: Escuela, DIA, HORARIO, COMISION.");
         }
 
+        // Columnas extra = todas menos las 4 clave
+        const coreSet = new Set([H_ESC, H_DIA, H_HOR, H_COM]);
+        EXTRA_HEADERS = HEADERS.filter(h => !coreSet.has(h));
+
         ROWS = raw.slice(1).map(r => {
           const o={};
           HEADERS.forEach((h,i)=>o[h]=r[i]);
@@ -159,12 +170,12 @@
       }
     })();
 
-    // Reseteo parcial de selects y UI
-    function resetDiaHorario() {
+    // Utilidades UI
+    function resetDiaHorarioYResultados() {
       $dia.innerHTML = '<option value="">(Elegí día)</option>';
       $horario.innerHTML = '<option value="">(Elegí horario)</option>';
       $dia.disabled = true; $horario.disabled = true;
-      $comis.innerHTML = "";
+      $resultados.innerHTML = "";
       updateCounter(0);
     }
 
@@ -172,9 +183,66 @@
       $contador.textContent = `Comisiones: ${n}`;
     }
 
+    function renderResultados(gruposPorComision) {
+      $resultados.innerHTML = "";
+      const comisiones = Object.keys(gruposPorComision).sort((a,b)=>a.localeCompare(b, 'es'));
+      updateCounter(comisiones.length);
+
+      comisiones.forEach(com => {
+        const card = document.createElement('div');
+        card.className = 'comision-card';
+
+        const h = document.createElement('p');
+        h.className = 'comision-title';
+        h.textContent = com || '(Sin nombre de comisión)';
+        card.appendChild(h);
+
+        // Si no hay columnas extra, mostramos un chip simple
+        if (!EXTRA_HEADERS.length) {
+          const chip = document.createElement('div');
+          chip.className = 'chip';
+          chip.textContent = 'Sin columnas adicionales';
+          card.appendChild(chip);
+        } else {
+          // Tabla con columnas extra
+          const table = document.createElement('table');
+          table.className = 'mini-table';
+
+          const thead = document.createElement('thead');
+          const trh = document.createElement('tr');
+          EXTRA_HEADERS.forEach(hh => {
+            const th = document.createElement('th'); th.textContent = hh; trh.appendChild(th);
+          });
+          thead.appendChild(trh);
+          table.appendChild(thead);
+
+          const tbody = document.createElement('tbody');
+          gruposPorComision[com].forEach(row => {
+            const tr = document.createElement('tr');
+            EXTRA_HEADERS.forEach(hh => {
+              const td = document.createElement('td');
+              td.textContent = row[hh] != null ? row[hh] : "";
+              tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+          });
+          table.appendChild(tbody);
+          card.appendChild(table);
+        }
+
+        $resultados.appendChild(card);
+      });
+
+      if (!comisiones.length) {
+        $status.textContent = "Sin comisiones para esa combinación.";
+      } else {
+        $status.textContent = `Listo: ${comisiones.length} comisión(es) encontrada(s).`;
+      }
+    }
+
     // Cascada: Escuela -> Día
     $escuela.addEventListener('change', () => {
-      resetDiaHorario();
+      resetDiaHorarioYResultados();
       const esc = $escuela.value.trim();
       if (!esc) { $status.textContent = "Elegí escuela."; return; }
 
@@ -194,7 +262,7 @@
     $dia.addEventListener('change', () => {
       $horario.innerHTML = '<option value="">(Elegí horario)</option>';
       $horario.disabled = true;
-      $comis.innerHTML = "";
+      $resultados.innerHTML = "";
       updateCounter(0);
 
       const esc = $escuela.value.trim();
@@ -213,45 +281,39 @@
       $status.textContent = "Elegí horario.";
     });
 
-    // Resultado: mostrar COMISION(ES) y contar
+    // Resultado: agrupar por COMISION y mostrar detalles extra
     $horario.addEventListener('change', () => {
-      $comis.innerHTML = "";
+      $resultados.innerHTML = "";
 
       const esc = $escuela.value.trim();
       const dia = $dia.value.trim();
       const hor = $horario.value.trim();
       if (!esc || !dia || !hor) { $status.textContent = "Completá los 3 filtros."; updateCounter(0); return; }
 
-      const comisiones = uniq(
-        ROWS.filter(r =>
-          String(r[H_ESC]).trim() === esc &&
-          String(r[H_DIA]).trim() === dia &&
-          String(r[H_HOR]).trim() === hor
-        ).map(r => String(r[H_COM]).trim())
-      ).sort();
+      const rows = ROWS.filter(r =>
+        String(r[H_ESC]).trim() === esc &&
+        String(r[H_DIA]).trim() === dia &&
+        String(r[H_HOR]).trim() === hor
+      );
 
-      if (!comisiones.length) {
-        $status.textContent = "Sin comisiones para esa combinación.";
-        updateCounter(0);
-        return;
-      }
+      // Agrupar por COMISION (únicas)
+      const grupos = {};
+      rows.forEach(r => {
+        const key = String(r[H_COM]).trim();
+        if (!grupos[key]) grupos[key] = [];
+        grupos[key].push(r);
+      });
 
-      for (const c of comisiones) {
-        const div = document.createElement('div');
-        div.className = 'chip';
-        div.textContent = c;
-        $comis.appendChild(div);
-      }
-      updateCounter(comisiones.length);
-      $status.textContent = `Listo: ${comisiones.length} comisión(es) encontrada(s).`;
+      renderResultados(grupos);
     });
 
     // Limpiar todo
-    $limpiar.addEventListener('click', () => {
+    document.getElementById('limpiar').addEventListener('click', () => {
       $escuela.value = "";
-      resetDiaHorario();
+      resetDiaHorarioYResultados();
       $status.textContent = "Elegí escuela.";
     });
   </script>
 </body>
 </html>
+
