@@ -15,7 +15,7 @@
     /* Layout principal: contenido + aside */
     .layout{
       display:grid;
-      grid-template-columns: 1fr 320px;
+      grid-template-columns: 1fr 360px;
       gap: 16px;
     }
     @media (max-width: 980px){
@@ -39,11 +39,14 @@
     .mini-table th,.mini-table td{border:1px solid #eee;padding:8px;text-align:left;font-size:14px}
     .mini-table th{background:#f7f7f7}
 
-    /* Aside (Dirección de la escuela) */
+    /* Aside (Dirección + Mapa) */
     .aside{padding:16px;border:1px solid #e7e7e7;border-radius:12px;background:#fff}
     .aside-title{margin:0 0 8px 0;font-size:16px;font-weight:700}
     .aside-box{font-size:14px;color:#333;white-space:pre-wrap}
     .aside-muted{font-size:13px;color:#666;margin-top:6px}
+    .map-wrap{margin-top:10px}
+    .map-select{margin-top:8px}
+    .map-frame{width:100%;height:260px;border:0;border-radius:8px}
   </style>
 </head>
 <body>
@@ -96,10 +99,23 @@
         </div>
       </div>
 
-      <!-- Aside con Dirección -->
+      <!-- Aside con Dirección + Mapa -->
       <aside class="aside" id="aside-direccion" style="display:none;">
         <h3 class="aside-title">Dirección de la escuela</h3>
+
         <div class="aside-box" id="direccion-value"></div>
+
+        <!-- Selector de dirección (si hay varias) -->
+        <div class="map-select" id="direccion-select-wrap" style="display:none;">
+          <label for="direccion-select" class="muted">Ver en mapa:</label><br/>
+          <select id="direccion-select"></select>
+        </div>
+
+        <div class="map-wrap">
+          <!-- Mapa embebido (Google Maps) -->
+          <iframe id="map-frame" class="map-frame" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+        </div>
+
         <div class="aside-muted">Se completa al elegir una escuela.</div>
       </aside>
     </div>
@@ -112,6 +128,7 @@
     // Helpers
     const normalize = s => String(s||"").toLowerCase()
       .normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+    const uniq = arr => Array.from(new Set(arr.filter(v => v!==undefined && v!==null && String(v).trim()!=="")));
 
     // CSV parser básico con comillas dobles
     function parseCSV(text) {
@@ -134,8 +151,6 @@
       return rows;
     }
 
-    const uniq = arr => Array.from(new Set(arr.filter(v => v!==undefined && v!==null && String(v).trim()!=="")));
-
     // Estado
     let HEADERS=[], ROWS=[];
     let H_ESC=null, H_DIA=null, H_HOR=null, H_COM=null;
@@ -150,8 +165,61 @@
     const $limpiar = document.getElementById('limpiar');
     const $contador = document.getElementById('contador');
     const $resultados = document.getElementById('resultados');
+
     const $asideDir = document.getElementById('aside-direccion');
     const $dirVal   = document.getElementById('direccion-value');
+    const $mapFrame = document.getElementById('map-frame');
+    const $dirSelectWrap = document.getElementById('direccion-select-wrap');
+    const $dirSelect = document.getElementById('direccion-select');
+
+    // Mapa: armar URL de embed (sin API key)
+    function mapEmbedURL(address){
+      const q = encodeURIComponent(address);
+      // Búsqueda simple en Google Maps (no requiere API key)
+      return `https://www.google.com/maps?q=${q}&output=embed`;
+    }
+
+    function setDireccionAside(direcciones) {
+      // direcciones: array de strings (puede venir vacío)
+      const list = (direcciones || []).map(d => String(d).trim()).filter(Boolean);
+      if (!list.length) {
+        $dirVal.textContent = "";
+        $asideDir.style.display = "none";
+        $mapFrame.removeAttribute('src');
+        $dirSelectWrap.style.display = "none";
+        $dirSelect.innerHTML = "";
+        return;
+      }
+
+      $asideDir.style.display = "block";
+      // Texto: todas las direcciones unidas (informativo)
+      $dirVal.textContent = list.join(" • ");
+
+      // Selector si hay varias
+      if (list.length > 1) {
+        $dirSelectWrap.style.display = "block";
+        $dirSelect.innerHTML = "";
+        list.forEach((d, i) => {
+          const opt = document.createElement('option');
+          opt.value = d; opt.textContent = d.length > 60 ? (d.slice(0,60) + '…') : d;
+          if (i === 0) opt.selected = true;
+          $dirSelect.appendChild(opt);
+        });
+      } else {
+        $dirSelectWrap.style.display = "none";
+        $dirSelect.innerHTML = "";
+      }
+
+      // Mostrar en mapa la primera (o la seleccionada si ya hay select)
+      const addr = $dirSelect.value || list[0];
+      $mapFrame.src = mapEmbedURL(addr);
+    }
+
+    // Cambiar mapa al elegir otra dirección del selector
+    $dirSelect.addEventListener('change', () => {
+      const addr = $dirSelect.value;
+      if (addr) $mapFrame.src = mapEmbedURL(addr);
+    });
 
     // Carga inicial
     (async function init(){
@@ -170,7 +238,7 @@
         H_HOR = byNorm.get('horario') || byNorm.get('turno') || null;
         H_COM = byNorm.get('comision') || byNorm.get('comisión') || null;
 
-        // NUEVO: columna "direccion de la escuela" (con o sin tildes)
+        // NUEVO: "direccion de la escuela" (con o sin tildes)
         H_DIR_SCHOOL =
           byNorm.get('direccion de la escuela') ||
           byNorm.get('dirección de la escuela') ||
@@ -181,7 +249,7 @@
           throw new Error("Encabezados requeridos no encontrados. Se esperan: Escuela, DIA, HORARIO, COMISION.");
         }
 
-        // Columnas extra = todas menos las 4 clave y la de dirección de la escuela (para no repetirla en cada tarjeta)
+        // Columnas extra = todas menos las 4 clave y la de dirección general (para no repetirla en la tabla)
         const coreSet = new Set([H_ESC, H_DIA, H_HOR, H_COM, H_DIR_SCHOOL].filter(Boolean));
         EXTRA_HEADERS = HEADERS.filter(h => !coreSet.has(h));
 
@@ -216,17 +284,6 @@
 
     function updateCounter(n) {
       $contador.textContent = `Comisiones: ${n}`;
-    }
-
-    function setDireccionAside(texto) {
-      const clean = (texto || "").toString().trim();
-      if (clean) {
-        $dirVal.textContent = clean;
-        $asideDir.style.display = "block";
-      } else {
-        $dirVal.textContent = "";
-        $asideDir.style.display = "none";
-      }
     }
 
     function renderResultados(gruposPorComision) {
@@ -280,21 +337,22 @@
       }
     }
 
-    // Cascada: Escuela -> Día (y setear dirección)
+    // Cascada: Escuela -> Día (y setear dirección + mapa)
     $escuela.addEventListener('change', () => {
       resetDiaHorarioYResultados();
 
       const esc = $escuela.value.trim();
-      // Actualizar dirección del aside
+
+      // Actualizar DIRECCIÓN + MAPA
       if (H_DIR_SCHOOL && esc) {
         const dirs = uniq(
           ROWS.filter(r => String(r[H_ESC]).trim() === esc)
               .map(r => String(r[H_DIR_SCHOOL] || "").trim())
               .filter(Boolean)
         );
-        setDireccionAside(dirs.join(" • "));
+        setDireccionAside(dirs);
       } else {
-        setDireccionAside("");
+        setDireccionAside([]);
       }
 
       if (!esc) { $status.textContent = "Elegí escuela."; return; }
@@ -362,7 +420,7 @@
     // Limpiar todo
     document.getElementById('limpiar').addEventListener('click', () => {
       $escuela.value = "";
-      setDireccionAside("");
+      setDireccionAside([]);
       $dia.innerHTML = '<option value="">(Elegí día)</option>';
       $horario.innerHTML = '<option value="">(Elegí horario)</option>';
       $dia.disabled = true; $horario.disabled = true;
@@ -373,5 +431,6 @@
   </script>
 </body>
 </html>
+
 
 
