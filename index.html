@@ -7,10 +7,21 @@
   <style>
     :root { --gap: 12px; }
     body{font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; margin:24px; background:#fff}
-    .wrap{max-width:1000px;margin:0 auto}
+    .wrap{max-width:1200px;margin:0 auto}
     .header{display:flex;align-items:center;gap:14px;margin-bottom:16px}
     .logo{height:48px;width:auto;display:block}
     .title{font-size:24px;margin:0;line-height:1.15}
+
+    /* Layout principal: contenido + aside */
+    .layout{
+      display:grid;
+      grid-template-columns: 1fr 320px;
+      gap: 16px;
+    }
+    @media (max-width: 980px){
+      .layout{ grid-template-columns: 1fr; }
+    }
+
     .card{padding:20px;border:1px solid #e7e7e7;border-radius:12px;background:#fff}
     .row{display:flex;gap:var(--gap);flex-wrap:wrap;margin-bottom:var(--gap)}
     label{font-size:14px;color:#333}
@@ -18,17 +29,21 @@
     button{cursor:pointer}
     .muted{color:#666;font-size:14px}
     .hr{height:1px;background:#eee;margin:16px 0}
-    .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-    .chip{border:1px solid #ddd;border-radius:999px;padding:6px 10px}
     .meta{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
     .counter{font-weight:600;border:1px solid #ddd;border-radius:8px;padding:6px 10px}
 
-    /* Tarjetas de comisión con tabla de detalles */
+    /* Resultados */
     .comision-card{border:1px solid #e9e9e9;border-radius:10px;padding:12px;margin-top:12px}
     .comision-title{font-weight:600;margin:0 0 8px 0}
     .mini-table{width:100%;border-collapse:collapse}
     .mini-table th,.mini-table td{border:1px solid #eee;padding:8px;text-align:left;font-size:14px}
     .mini-table th{background:#f7f7f7}
+
+    /* Aside (Dirección de la escuela) */
+    .aside{padding:16px;border:1px solid #e7e7e7;border-radius:12px;background:#fff}
+    .aside-title{margin:0 0 8px 0;font-size:16px;font-weight:700}
+    .aside-box{font-size:14px;color:#333;white-space:pre-wrap}
+    .aside-muted{font-size:13px;color:#666;margin-top:6px}
   </style>
 </head>
 <body>
@@ -39,44 +54,54 @@
       <h1 class="title">Buscador Talleres de Diseño</h1>
     </div>
 
-    <div class="card">
-      <p class="muted">Elegí primero la <b>Escuela</b>, después el <b>Día</b>, luego el <b>Horario</b>. Te mostramos las <b>Comisiones</b> disponibles con sus datos.</p>
+    <div class="layout">
+      <!-- Columna principal -->
+      <div class="card">
+        <p class="muted">Elegí primero la <b>Escuela</b>, después el <b>Día</b>, luego el <b>Horario</b>. Te mostramos las <b>Comisiones</b> disponibles con sus datos.</p>
 
-      <div class="row">
-        <div>
-          <label for="escuela">Escuela</label><br/>
-          <select id="escuela" disabled>
-            <option value="">(Elegí escuela)</option>
-          </select>
+        <div class="row">
+          <div>
+            <label for="escuela">Escuela</label><br/>
+            <select id="escuela" disabled>
+              <option value="">(Elegí escuela)</option>
+            </select>
+          </div>
+          <div>
+            <label for="dia">Día</label><br/>
+            <select id="dia" disabled>
+              <option value="">(Elegí día)</option>
+            </select>
+          </div>
+          <div>
+            <label for="horario">Horario</label><br/>
+            <select id="horario" disabled>
+              <option value="">(Elegí horario)</option>
+            </select>
+          </div>
+          <div style="align-self:end;">
+            <button id="limpiar" disabled>Limpiar</button>
+          </div>
         </div>
-        <div>
-          <label for="dia">Día</label><br/>
-          <select id="dia" disabled>
-            <option value="">(Elegí día)</option>
-          </select>
+
+        <div class="meta">
+          <div id="status" class="muted">Cargando datos…</div>
+          <div id="contador" class="counter" aria-live="polite">Comisiones: 0</div>
         </div>
+
+        <div class="hr"></div>
+
         <div>
-          <label for="horario">Horario</label><br/>
-          <select id="horario" disabled>
-            <option value="">(Elegí horario)</option>
-          </select>
-        </div>
-        <div style="align-self:end;">
-          <button id="limpiar" disabled>Limpiar</button>
+          <div class="muted">Resultados:</div>
+          <div id="resultados"></div>
         </div>
       </div>
 
-      <div class="meta">
-        <div id="status" class="muted">Cargando datos…</div>
-        <div id="contador" class="counter" aria-live="polite">Comisiones: 0</div>
-      </div>
-
-      <div class="hr"></div>
-
-      <div>
-        <div class="muted">Resultados:</div>
-        <div id="resultados"></div>
-      </div>
+      <!-- Aside con Dirección -->
+      <aside class="aside" id="aside-direccion" style="display:none;">
+        <h3 class="aside-title">Dirección de la escuela</h3>
+        <div class="aside-box" id="direccion-value"></div>
+        <div class="aside-muted">Se completa al elegir una escuela.</div>
+      </aside>
     </div>
   </div>
 
@@ -114,6 +139,7 @@
     // Estado
     let HEADERS=[], ROWS=[];
     let H_ESC=null, H_DIA=null, H_HOR=null, H_COM=null;
+    let H_DIR_SCHOOL=null; // "direccion de la escuela"
     let EXTRA_HEADERS=[];
 
     // UI refs
@@ -124,6 +150,8 @@
     const $limpiar = document.getElementById('limpiar');
     const $contador = document.getElementById('contador');
     const $resultados = document.getElementById('resultados');
+    const $asideDir = document.getElementById('aside-direccion');
+    const $dirVal   = document.getElementById('direccion-value');
 
     // Carga inicial
     (async function init(){
@@ -142,12 +170,19 @@
         H_HOR = byNorm.get('horario') || byNorm.get('turno') || null;
         H_COM = byNorm.get('comision') || byNorm.get('comisión') || null;
 
+        // NUEVO: columna "direccion de la escuela" (con o sin tildes)
+        H_DIR_SCHOOL =
+          byNorm.get('direccion de la escuela') ||
+          byNorm.get('dirección de la escuela') ||
+          byNorm.get('direccion escuela') ||
+          byNorm.get('dirección escuela') || null;
+
         if (!H_ESC || !H_DIA || !H_HOR || !H_COM) {
           throw new Error("Encabezados requeridos no encontrados. Se esperan: Escuela, DIA, HORARIO, COMISION.");
         }
 
-        // Columnas extra = todas menos las 4 clave
-        const coreSet = new Set([H_ESC, H_DIA, H_HOR, H_COM]);
+        // Columnas extra = todas menos las 4 clave y la de dirección de la escuela (para no repetirla en cada tarjeta)
+        const coreSet = new Set([H_ESC, H_DIA, H_HOR, H_COM, H_DIR_SCHOOL].filter(Boolean));
         EXTRA_HEADERS = HEADERS.filter(h => !coreSet.has(h));
 
         ROWS = raw.slice(1).map(r => {
@@ -183,6 +218,17 @@
       $contador.textContent = `Comisiones: ${n}`;
     }
 
+    function setDireccionAside(texto) {
+      const clean = (texto || "").toString().trim();
+      if (clean) {
+        $dirVal.textContent = clean;
+        $asideDir.style.display = "block";
+      } else {
+        $dirVal.textContent = "";
+        $asideDir.style.display = "none";
+      }
+    }
+
     function renderResultados(gruposPorComision) {
       $resultados.innerHTML = "";
       const comisiones = Object.keys(gruposPorComision).sort((a,b)=>a.localeCompare(b, 'es'));
@@ -197,14 +243,8 @@
         h.textContent = com || '(Sin nombre de comisión)';
         card.appendChild(h);
 
-        // Si no hay columnas extra, mostramos un chip simple
-        if (!EXTRA_HEADERS.length) {
-          const chip = document.createElement('div');
-          chip.className = 'chip';
-          chip.textContent = 'Sin columnas adicionales';
-          card.appendChild(chip);
-        } else {
-          // Tabla con columnas extra
+        // Tabla con columnas extra (si hay)
+        if (EXTRA_HEADERS.length) {
           const table = document.createElement('table');
           table.className = 'mini-table';
 
@@ -240,10 +280,23 @@
       }
     }
 
-    // Cascada: Escuela -> Día
+    // Cascada: Escuela -> Día (y setear dirección)
     $escuela.addEventListener('change', () => {
       resetDiaHorarioYResultados();
+
       const esc = $escuela.value.trim();
+      // Actualizar dirección del aside
+      if (H_DIR_SCHOOL && esc) {
+        const dirs = uniq(
+          ROWS.filter(r => String(r[H_ESC]).trim() === esc)
+              .map(r => String(r[H_DIR_SCHOOL] || "").trim())
+              .filter(Boolean)
+        );
+        setDireccionAside(dirs.join(" • "));
+      } else {
+        setDireccionAside("");
+      }
+
       if (!esc) { $status.textContent = "Elegí escuela."; return; }
 
       const dias = uniq(
@@ -296,7 +349,6 @@
         String(r[H_HOR]).trim() === hor
       );
 
-      // Agrupar por COMISION (únicas)
       const grupos = {};
       rows.forEach(r => {
         const key = String(r[H_COM]).trim();
@@ -310,10 +362,16 @@
     // Limpiar todo
     document.getElementById('limpiar').addEventListener('click', () => {
       $escuela.value = "";
-      resetDiaHorarioYResultados();
+      setDireccionAside("");
+      $dia.innerHTML = '<option value="">(Elegí día)</option>';
+      $horario.innerHTML = '<option value="">(Elegí horario)</option>';
+      $dia.disabled = true; $horario.disabled = true;
+      $resultados.innerHTML = "";
+      updateCounter(0);
       $status.textContent = "Elegí escuela.";
     });
   </script>
 </body>
 </html>
+
 
