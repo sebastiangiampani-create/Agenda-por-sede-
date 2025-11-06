@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Buscador</title>
+  <style>
+    :root { --gap: 12px; }
+    body{font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; margin:24px}
+    .card{max-width:960px;margin:0 auto;padding:20px;border:1px solid #ddd;border-radius:12px}
+    .row{display:flex;gap:var(--gap);flex-wrap:wrap;margin-bottom:var(--gap)}
+    label{font-size:14px;color:#333}
+    select,button{padding:10px 12px;font-size:16px}
+    .muted{color:#666;font-size:14px}
+    .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+    .chip{border:1px solid #ddd;border-radius:999px;padding:6px 10px}
+    .hr{height:1px;background:#eee;margin:16px 0}
+    .hint{font-size:13px;color:#555}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Buscador</h1>
+    <p class="muted">Elegí primero la <b>Escuela</b>, después el <b>Día</b>, luego el <b>Horario</b>. Te mostramos las <b>Comisiones</b> disponibles.</p>
+
+    <div class="row">
+      <div>
+        <label for="escuela">Escuela</label><br/>
+        <select id="escuela" disabled>
+          <option value="">(Elegí escuela)</option>
+        </select>
+      </div>
+      <div>
+        <label for="dia">Día</label><br/>
+        <select id="dia" disabled>
+          <option value="">(Elegí día)</option>
+        </select>
+      </div>
+      <div>
+        <label for="horario">Horario</label><br/>
+        <select id="horario" disabled>
+          <option value="">(Elegí horario)</option>
+        </select>
+      </div>
+      <div style="align-self:end;">
+        <button id="limpiar" disabled>Limpiar</button>
+      </div>
+    </div>
+
+    <div id="status" class="muted">Cargando datos…</div>
+    <div class="hr"></div>
+
+    <div>
+      <div class="hint">Comisiones coincidentes:</div>
+      <div id="comisiones" class="chips"></div>
+    </div>
+  </div>
+
+  <script>
+    // === TU CSV PÚBLICO ===
+    const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQgHmSCDyof2tEKeRp77d9vnBhpQvAbVfy1NDqDE_Q9CvvGVaObzWLEjnjRYlJCJhVPTDR8fwckvu4D/pub?output=csv";
+
+    // --- Helpers ---
+    const normalize = s => String(s||"").toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+
+    // CSV parser básico con comillas dobles
+    function parseCSV(text) {
+      const rows = [];
+      let row = [], val = "", inQuotes = false;
+      for (let i=0; i<text.length; i++) {
+        const c = text[i], n = text[i+1];
+        if (c === '"') {
+          if (inQuotes && n === '"') { val += '"'; i++; }
+          else inQuotes = !inQuotes;
+        } else if (c === ',' && !inQuotes) {
+          row.push(val); val = "";
+        } else if ((c === '\n' || c === '\r') && !inQuotes) {
+          if (val !== "" || row.length) { row.push(val); rows.push(row); row = []; val = ""; }
+        } else {
+          val += c;
+        }
+      }
+      if (val !== "" || row.length) row.push(val), rows.push(row);
+      return rows;
+    }
+
+    const uniq = arr => Array.from(new Set(arr.filter(v => v!==undefined && v!==null && String(v).trim()!=="")));
+
+    // --- State ---
+    let HEADERS=[], ROWS=[];
+    let H_ESC=null, H_DIA=null, H_HOR=null, H_COM=null;
+
+    // --- UI refs ---
+    const $escuela = document.getElementById('escuela');
+    const $dia     = document.getElementById('dia');
+    const $horario = document.getElementById('horario');
+    const $status  = document.getElementById('status');
+    const $comis   = document.getElementById('comisiones');
+    const $limpiar = document.getElementById('limpiar');
+
+    // --- Load data ---
+    (async function init(){
+      try{
+        const res = await fetch(CSV_URL, { cache: "no-store" });
+        const text = await res.text();
+        const raw = parseCSV(text);
+        if (!raw.length) throw new Error("CSV vacío");
+
+        HEADERS = raw[0].map(h => String(h).trim());
+        const byNorm = new Map(HEADERS.map(h => [normalize(h), h]));
+
+        // Detectar encabezados
+        H_ESC = byNorm.get('escuela') || byNorm.get('escuelas') || null;
+        H_DIA = byNorm.get('dia') || byNorm.get('día') || null;
+        H_HOR = byNorm.get('horario') || byNorm.get('turno') || null;
+        H_COM = byNorm.get('comision') || byNorm.get('comisión') || null;
+
+        if (!H_ESC || !H_DIA || !H_HOR || !H_COM) {
+          throw new Error("Encabezados requeridos no encontrados. Se esperan: Escuela, DIA, HORARIO, COMISION.");
+        }
+
+        ROWS = raw.slice(1).map(r => {
+          const o={};
+          HEADERS.forEach((h,i)=>o[h]=r[i]);
+          return o;
+        });
+
+        // Poblar ESCUELA
+        const escuelas = uniq(ROWS.map(r => String(r[H_ESC]).trim())).sort();
+        for (const e of escuelas) {
+          const opt = document.createElement('option'); opt.value=e; opt.textContent=e; $escuela.appendChild(opt);
+        }
+        $escuela.disabled = false;
+        $limpiar.disabled = false;
+        $status.textContent = "Listo. Elegí escuela.";
+      }catch(err){
+        console.error(err);
+        $status.textContent = "No pude leer el CSV o faltan encabezados. Revisá permisos/columnas.";
+      }
+    })();
+
+    // --- Cascada: Escuela -> Día ---
+    $escuela.addEventListener('change', () => {
+      $dia.innerHTML = '<option value="">(Elegí día)</option>';
+      $horario.innerHTML = '<option value="">(Elegí horario)</option>';
+      $dia.disabled = true; $horario.disabled = true;
+      $comis.innerHTML = "";
+
+      const esc = $escuela.value.trim();
+      if (!esc) { $status.textContent = "Elegí escuela."; return; }
+
+      const dias = uniq(
+        ROWS.filter(r => String(r[H_ESC]).trim() === esc)
+            .map(r => String(r[H_DIA]).trim())
+      ).sort();
+
+      for (const d of dias) {
+        const opt=document.createElement('option'); opt.value=d; opt.textContent=d; $dia.appendChild(opt);
+      }
+      $dia.disabled = false;
+      $status.textContent = "Elegí día.";
+    });
+
+    // --- Cascada: Día -> Horario ---
+    $dia.addEventListener('change', () => {
+      $horario.innerHTML = '<option value="">(Elegí horario)</option>';
+      $horario.disabled = true;
+      $comis.innerHTML = "";
+
+      const esc = $escuela.value.trim();
+      const dia = $dia.value.trim();
+      if (!esc || !dia) { $status.textContent = "Elegí escuela y día."; return; }
+
+      const horarios = uniq(
+        ROWS.filter(r => String(r[H_ESC]).trim() === esc && String(r[H_DIA]).trim() === dia)
+            .map(r => String(r[H_HOR]).trim())
+      ).sort();
+
+      for (const h of horarios) {
+        const opt=document.createElement('option'); opt.value=h; opt.textContent=h; $horario.appendChild(opt);
+      }
+      $horario.disabled = false;
+      $status.textContent = "Elegí horario.";
+    });
+
+    // --- Resultado: mostrar COMISION(ES) ---
+    $horario.addEventListener('change', () => {
+      $comis.innerHTML = "";
+
+      const esc = $escuela.value.trim();
+      const dia = $dia.value.trim();
+      const hor = $horario.value.trim();
+      if (!esc || !dia || !hor) { $status.textContent = "Completá los 3 filtros."; return; }
+
+      const comisiones = uniq(
+        ROWS.filter(r =>
+          String(r[H_ESC]).trim() === esc &&
+          String(r[H_DIA]).trim() === dia &&
+          String(r[H_HOR]).trim() === hor
+        ).map(r => String(r[H_COM]).trim())
+      ).sort();
+
+      if (!comisiones.length) {
+        $status.textContent = "Sin comisiones para esa combinación.";
+        return;
+      }
+
+      for (const c of comisiones) {
+        const div = document.createElement('div');
+        div.className = 'chip';
+        div.textContent = c;
+        $comis.appendChild(div);
+      }
+      $status.textContent = `Comisiones: ${comisiones.length}`;
+    });
+
+    // --- Limpiar ---
+    $limpiar.addEventListener('click', () => {
+      $escuela.value = "";
+      $dia.innerHTML = '<option value="">(Elegí día)</option>';
+      $horario.innerHTML = '<option value="">(Elegí horario)</option>';
+      $dia.disabled = true; $horario.disabled = true;
+      $comis.innerHTML = "";
+      $status.textContent = "Elegí escuela.";
+    });
+  </script>
+</body>
+</html>
